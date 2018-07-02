@@ -5,6 +5,34 @@ from unz.google_client import GoogleClient
 import base64
 
 
+def get_messages():
+    client = GoogleClient()
+    service = client.service
+    # messages = service.users().messages().list(userId='me', q='from:{dummy@mail} filename:zip').execute()
+    messages = service.users().messages().list(userId='me', q='filename:zip').execute()
+
+
+def get_batch_messages():
+    client = GoogleClient()
+    service = client.service
+    # messages = service.users().messages().list(userId='me', q='from:{dummy@mail} filename:zip').execute()
+    message_ids = service.users().messages().list(userId='me', q='filename:zip').execute()
+    batch = service.new_batch_http_request()
+    ret = []
+
+    def each_request_callback(request_id, response, exception):
+        print(request_id)
+        ret.append(response)
+    import time
+    tic = time.time()
+    for message in message_ids['messages']:
+        message_id = message['id']
+        batch.add(service.users().messages().get(userId='me', id=message_id, format='metadata'), callback=each_request_callback)
+    batch.execute()
+    print("elapsed:", time.time() - tic)
+    # print(ret)
+
+
 def load_zip():
     client = GoogleClient()
     service = client.service
@@ -65,44 +93,9 @@ def label_handling():
     print(unzipper_labels)
 
 
-
-# def main():
-#     client = GoogleClient()
-#
-#     """
-#     １日以内、zipファイル付き、dor:doneラベルがついてないものを収集
-#     """
-#     recent_attach_zip_mails = client.get_recent_mails()
-#     encrypted_zip_mails = []
-#     for mail in recent_attach_zip_mails:
-#         # check mail zip file is encrypted.
-#         pass
-#         """
-#         if zip and not encrypted => done
-#         """
-#     if len(encrypted_zip_mails) == 0:
-#         return
-#
-#     for mail in encrypted_zip_mails:
-#         """
-#         同一人物からの（もしくは同一組織・ドメイン？）、それ以降に来たメールをチェック
-#         パスワード候補の文字列を取得する
-#         """
-#         password_candidates = []
-#         for m in client.get_mail():
-#             pass
-#
-#         """
-#
-#         """
-#         pass
-#     pass
-
-def sandbox():
-    load_zip()
-    # label_handling()
-
-
 if __name__ == '__main__':
     # main()
-    sandbox()
+    # sandbox()
+    # get_messages()
+    get_batch_messages()
+    # load_zip()
