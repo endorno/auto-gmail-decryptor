@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import argparse
+
+from setuptools import glob
+
 from unz.google_client import GoogleClient
 from unz.mail_unzipper import MailUnzipper, GmailSearchQueryBuilder, PROCESSING_LABEL, DONE_LABEL
 import base64
@@ -9,6 +12,8 @@ import io
 import re
 import logging
 import os
+
+TMP_CACHE_DIR = "tmp/"
 
 
 def attachment_id2tmp_filename(attachment_id):
@@ -49,8 +54,11 @@ def store_encrypted_zip_mail(newer_than):
                     break
             if is_encrypted:
                 should_add_processing_label = True
+                save_dir = os.path.join(TMP_CACHE_DIR, message_id)
+                os.makedirs(save_dir, exist_ok=True)
+
                 filename = attachment_id2tmp_filename(attachment_id[:30])
-                with open('tmp/{}'.format(filename), 'wb') as f:
+                with open(os.path.join(save_dir, filename), 'wb') as f:
                     f.write(zip_binary)
                 logging.info("store encrypted file:{}".format(filename))
 
@@ -111,29 +119,27 @@ def decrypt_stored_files(newer_than, search_range):
             continue
         message_id = mail['id']
 
-        message_with_detail = client.get_message(message_id)
-        zip_attachment_ids = client.extract_zip_attachment_ids(message_with_detail)
-        del mail
+        # attachment_idは毎回変わってしまう・・
+        # message_with_detail = client.get_message(message_id)
+        # zip_attachment_ids = client.extract_zip_attachment_ids(message_with_detail)
+        # del mail
+
+        encrypted_file_paths = glob.glob(os.path.join(TMP_CACHE_DIR, message_id, "*.zip"))
+
+        # TODO 別サーバーでやってると保存されていない。保存し直す
 
         # 基本的には1つ想定
-        for zid in zip_attachment_ids:
-            fpath = "tmp/" + attachment_id2tmp_filename(zid)
-
-            if os.path.exists(fpath):
-                f = fpath
-            else:
-                # 他サーバーで動かしたりする場合、processing labelがついていてもtmp以下にキャッシュされていない可能性がある
-                raise NotImplementedError("not implement reload zip. now, you should store zip file for tmp")
-            with zipfile.ZipFile(f) as zf:
+        for fpath in encrypted_file_paths:
+            with zipfile.ZipFile(fpath) as zf:
                 matched_password = unzipper.try_passwords(zf, password_candidates)
 
-            if matched_password is not None:
-                print("find password for {}".format(fpath))
-                zf.extractall(fpath.replace(".zip", ".opened"))
-                # TODO labelをdoneにする
-                # TODO 解凍してthreadに紐付ける
-            else:
-                pass
+                if matched_password is not None:
+                    print("find correct password {} for {}".format(matched_password, fpath))
+                    zf.extractall(fpath.replace(".zip", ""), pwd=matched_password.encode('ascii'))
+                    # TODO labelをdoneにする
+                    # TODO 解凍してthreadに紐付けてメール送信
+                else:
+                    pass
 
 
 def main():
