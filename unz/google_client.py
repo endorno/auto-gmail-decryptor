@@ -154,7 +154,10 @@ class GoogleClient:
                     if p['mimeType'] == 'text/plain':
                         # TODO not sure utf-8
                         text_data = p['body']['data']
+        elif payload['mimeType'] == 'text/plain':
+            text_data = payload['body']['data']
         else:
+            # html/text multipart.
             parts = message['payload']['parts']
             for p in parts:
                 if p['mimeType'] == 'text/plain':

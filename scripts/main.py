@@ -131,11 +131,13 @@ def decrypt_stored_files(newer_than, search_range):
         # 基本的には1つ想定
         for fpath in encrypted_file_paths:
             with zipfile.ZipFile(fpath) as zf:
+                print("try: ", password_candidates)
                 matched_password = unzipper.try_passwords(zf, password_candidates)
 
                 if matched_password is not None:
                     print("find correct password {} for {}".format(matched_password, fpath))
-                    zf.extractall(fpath.replace(".zip", ""), pwd=matched_password.encode('ascii'))
+                    unzipper.extract_all(zf, fpath.replace(".zip", ""), password=matched_password.encode('ascii'))
+                    # zf.extractall(fpath.replace(".zip", ""), pwd=matched_password.encode('ascii'))
                     # TODO labelをdoneにする
                     # TODO 解凍してthreadに紐付けてメール送信
                 else:
@@ -160,7 +162,23 @@ def _decrypt_test():
     decrypt_stored_files('1m', 'himself')
 
 
+def test_encode():
+    path = 'tmp/1641719ea0d1ed77/ANGjdJ9rMSHopEXXYYKp7pXJQzTu62.zip'
+    pwd = b't9uphiP9UO'
+    import zipfile
+    with zipfile.ZipFile(path) as zf:
+        for t in zf.filelist:
+            if not (t.flag_bits & 0x800):
+                old_name = t.filename
+                new_name = t.filename.encode('cp437').decode('sjis')
+                t.filename = new_name
+                zf.NameToInfo[new_name] = zf.NameToInfo[old_name]
+                del zf.NameToInfo[old_name]
+        zf.extractall(pwd=pwd)
+
+
 if __name__ == '__main__':
     # main()
     # _storing_test()
     _decrypt_test()
+    # test_encode()

@@ -74,9 +74,31 @@ class MailUnzipper:
             # TODO 日本語パスワードに対応？
             binary_c = c.encode('ascii')  # should be ascii
             zf.setpassword(binary_c)
+            chunk_size = 2 ** 5
+
             try:
-                zf.testzip()
-            except RuntimeError as e:
+                for zinfo in zf.filelist:
+                    with zf.open(zinfo.filename, "r") as f:
+                        # readしないと変なパスワードがパスしてしまう
+                        f.read(chunk_size)
+                        pass
+                return c
+            except:
                 continue
-            return c
         return None
+
+    def extract_all(self, zf, save_path, password, fix_encoding_as_sjis=True):
+        """
+        :param zipfile.ZipFile zf:
+        :return:
+        """
+        if fix_encoding_as_sjis:
+            for t in zf.filelist:
+                if not (t.flag_bits & 0x800):
+                    old_name = t.filename
+                    new_name = t.filename.encode('cp437').decode('sjis')
+                    if old_name != new_name:
+                        t.filename = new_name
+                        zf.NameToInfo[new_name] = zf.NameToInfo[old_name]
+                        del zf.NameToInfo[old_name]
+        zf.extractall(save_path, pwd=password)
