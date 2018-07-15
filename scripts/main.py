@@ -176,7 +176,7 @@ def decrypt_stored_files(newer_than, search_range):
 def main():
     parser = argparse.ArgumentParser('mail-unzipper')
     parser.add_argument('--newer_than', type=str, default='1d', help='gmail search query: e.g. 1d, 1m, 1y')
-    parser.add_argument('--range', type=str, default='himself', choices=['himself', 'domain'],
+    parser.add_argument('--range', type=str, default='domain', choices=['himself', 'domain'],
                         help='sender who can send password range(himself or domain)')
     args = parser.parse_args()
     store_encrypted_zip_mail(args.newer_than)
@@ -207,9 +207,10 @@ def test_encode():
 
 
 if __name__ == '__main__':
+    main()
     # client = GoogleClient()
     # ret = client.search_mails('filename:zip newer_than:7d from:"me" to:"me"')
     # print("len:{}".format(len(ret)))
     # _storing_test()
-    _decrypt_test()
+    # _decrypt_test()
     # test_encode()
