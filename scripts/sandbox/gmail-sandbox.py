@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # Setup the Gmail API
-from unz.google_client import GoogleClient
+from unz.google_client import GoogleClient, create_message_with_zip
 import base64
+from pprint import pprint
 
 
 def get_messages():
@@ -10,6 +11,8 @@ def get_messages():
     service = client.service
     # messages = service.users().messages().list(userId='me', q='from:{dummy@mail} filename:zip').execute()
     messages = service.users().messages().list(userId='me', q='filename:zip').execute()
+    client.get_message('')
+    pprint(messages)
 
 
 def get_batch_messages():
@@ -23,14 +26,16 @@ def get_batch_messages():
     def each_request_callback(request_id, response, exception):
         print(request_id)
         ret.append(response)
+
     import time
     tic = time.time()
     for message in message_ids['messages']:
         message_id = message['id']
-        batch.add(service.users().messages().get(userId='me', id=message_id, format='metadata'), callback=each_request_callback)
+        batch.add(service.users().messages().get(userId='me', id=message_id, format='metadata'),
+                  callback=each_request_callback)
     batch.execute()
-    print("elapsed:", time.time() - tic)
-    # print(ret)
+    # print("elapsed:", time.time() - tic)
+    pprint(ret)
 
 
 def load_zip():
@@ -93,9 +98,51 @@ def label_handling():
     print(unzipper_labels)
 
 
+def send_zipped_mail():
+    client = GoogleClient()
+    my_address = client.get_profile()['emailAddress']
+    service = client.service
+    with open('data/example/important_files_noenc.zip', 'rb') as f:
+        zip_binary = f.read()
+    message = create_message_with_zip(my_address, my_address,
+                                      'Re: Hello Teppei',
+                                      'これは大事なファイルです from script', zip_binary, 'important_files_noenc.zip')
+    message['threadId'] = '1648ecad0fcc073b'
+    ret = service.users().messages().send(userId='me', body=message,
+                                          ).execute()
+    print("sent: ", ret)
+
+
+def get_profile():
+    client = GoogleClient()
+    profile = client.get_profile()
+    print(profile)
+
+
+def get_subjects():
+    client = GoogleClient()
+    messages = client.search_mails()
+    for message in messages:
+        print(client.extract_message_subject(message))
+
+
+def get_with_option():
+    from unz.mail_unzipper import GmailSearchQueryBuilder
+    client = GoogleClient()
+    query_builder = GmailSearchQueryBuilder('1m')
+    ret = client.search_mails(query_builder.build_processing_mails_query(),
+                              {'format': 'metadata',
+                               'metadataHeaders': ['From', 'Subject', 'subject']})
+    pprint(ret)
+
+
 if __name__ == '__main__':
+    # get_profile()
     # main()
     # sandbox()
     # get_messages()
-    get_batch_messages()
+    # get_batch_messages()
+    send_zipped_mail()
     # load_zip()
+    # get_subjects()
+    # get_with_option()

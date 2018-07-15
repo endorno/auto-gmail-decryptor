@@ -28,17 +28,27 @@ DONE_LABEL = "unzipper:done"
 
 
 class GmailSearchQueryBuilder:
-    def __init__(self, newer_than='1d'):
+    def __init__(self, newer_than='1d', exclude_from=None):
         self.newer_than = newer_than
+        self.exclude_from = exclude_from
 
     def build_new_zip_mails_query(self):
-        return "newer_than:{} filename:zip -label:{} -label{}".format(self.newer_than, PROCESSING_LABEL, DONE_LABEL)
+        ret = "newer_than:{} filename:zip -label:{} -label:{}".format(self.newer_than, PROCESSING_LABEL, DONE_LABEL)
+        if self.exclude_from:
+            ret += ' -from:{}'.format(self.exclude_from)
+        return ret
 
     def build_processing_mails_query(self):
-        return "newer_than:{} filename:zip label:{}".format(self.newer_than, PROCESSING_LABEL)
+        ret = "newer_than:{} filename:zip label:{}".format(self.newer_than, PROCESSING_LABEL)
+        if self.exclude_from:
+            ret += ' -from:{}'.format(self.exclude_from)
+        return ret
 
     def build_password_candidate_mails_query(self, sender_address_or_domain):
-        return "newer_than:{} from:{}".format(self.newer_than, sender_address_or_domain)
+        ret = "newer_than:{} from:{}".format(self.newer_than, sender_address_or_domain)
+        if self.exclude_from:
+            ret += ' -from:{}'.format(self.exclude_from)
+        return ret
 
 
 class MailUnzipper:

@@ -48,7 +48,7 @@ def create_message_with_zip(
     msg.add_header('Content-Disposition', 'attachment', filename=filename)
     message.attach(msg)
 
-    return {'raw': base64.urlsafe_b64encode(message.as_string())}
+    return {'raw': base64.urlsafe_b64encode(message.as_bytes()).decode('ascii')}
 
 
 class GoogleClient:
@@ -71,6 +71,12 @@ class GoogleClient:
             raise RuntimeError("no credentials. should get credentials before new")
         self.service = gdiscovery.build('gmail', 'v1',
                                         http=creds.authorize(Http()))  # type: gdiscovery.Resource
+
+    def get_profile(self):
+        return self.service.users().getProfile(userId='me').execute()
+
+    def get_my_address(self):
+        return self.get_profile()['emailAddress']
 
     def search_mails(self, query=None, get_option={}):
         """
@@ -96,9 +102,12 @@ class GoogleClient:
             batch.add(self.service.users().messages().get(userId='me', id=message_id, **get_option),
                       callback=each_request_callback)
         batch.execute()
-        # ret = []
-        # for item in id_list:
-        #     ret.append(self.service.users().messages().get(userId='me', id=item['id']).execute())
+        return ret
+
+    def send_message(self, message):
+        ret = self.service.users().messages().send(userId='me', body=message,
+                                                   ).execute()
+
         return ret
 
     def get_message(self, message_id):
@@ -172,3 +181,11 @@ class GoogleClient:
             if mime == 'application/zip':
                 zip_attachment_ids.append(part['body']['attachmentId'])
         return zip_attachment_ids
+
+    def extract_message_subject(self, message):
+        headers = message['payload']['headers']
+        for header in headers:
+            if header['name'] == 'subject' or header['name'] == 'Subject':
+                return header['value']
+
+        return ''

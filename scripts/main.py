@@ -4,7 +4,7 @@ import argparse
 
 from setuptools import glob
 
-from unz.google_client import GoogleClient
+from unz.google_client import GoogleClient, create_message_with_zip
 from unz.mail_unzipper import MailUnzipper, GmailSearchQueryBuilder, PROCESSING_LABEL, DONE_LABEL
 import base64
 import zipfile
@@ -12,8 +12,18 @@ import io
 import re
 import logging
 import os
+import shutil
+import colorlog
+from pprint import pprint
 
-TMP_CACHE_DIR = "tmp/"
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+handler = colorlog.StreamHandler()
+handler.setFormatter(colorlog.ColoredFormatter(
+    '%(log_color)s%(levelname)s:%(name)s:%(message)s'))
+logger.addHandler(handler)
+
+TMP_CACHE_DIR = "cache/"
 
 
 def attachment_id2tmp_filename(attachment_id):
@@ -22,24 +32,27 @@ def attachment_id2tmp_filename(attachment_id):
 
 def store_encrypted_zip_mail(newer_than):
     client = GoogleClient()
+
     label_name2id_table = client.get_label_name2id_table()  # type: dict[str, str]
+    my_address = client.get_my_address()
 
     for need_label_name in [PROCESSING_LABEL, DONE_LABEL]:
         if need_label_name not in label_name2id_table:
             created = client.create_label(need_label_name)
             label_name2id_table[need_label_name] = created['id']
 
-    query_builder = GmailSearchQueryBuilder(newer_than)
+    query_builder = GmailSearchQueryBuilder(newer_than, exclude_from=my_address)
 
     # zip付きのファイルを検出し、暗号化してあれば:doingラベルをつけ、ファイルをtmp以下にキャッシュ。暗号化してなければdoneフラグを立てる
-    # TODO: 複数のzipfileに対応させる
     new_zip_mails = client.search_mails(query_builder.build_new_zip_mails_query())
+    logger.info("hit {} new zip message".format(len(new_zip_mails)))
+
     for mail in new_zip_mails:
         message_id = mail['id']
         zip_attachment_ids = client.extract_zip_attachment_ids(mail)
 
         # 一つでも未解凍なファイルがあったらprocessingにする。（混在は無いと思うが一応・・）
-        should_add_processing_label = False
+        has_encrypted_file = False
         for attachment_id in zip_attachment_ids:
             zip_resource = client.get_attachment(message_id, attachment_id)
             zip_binary = base64.urlsafe_b64decode(zip_resource['data'])
@@ -47,13 +60,13 @@ def store_encrypted_zip_mail(newer_than):
             zip = zipfile.ZipFile(io.BytesIO(zip_binary))
 
             is_encrypted = False
-            # 1つでも暗号化されていれば暗号化zipとみなす（混在することがあるのかはよくわからない・・）
+            # 1つでも暗号化されていれば暗号化zipとみなす（ファイル単位で混在することがあるのかは不明・・）
             for zinfo in zip.infolist():
                 if zinfo.flag_bits & 0x1:
                     is_encrypted = True
                     break
             if is_encrypted:
-                should_add_processing_label = True
+                has_encrypted_file = True
                 save_dir = os.path.join(TMP_CACHE_DIR, message_id)
                 os.makedirs(save_dir, exist_ok=True)
 
@@ -62,7 +75,7 @@ def store_encrypted_zip_mail(newer_than):
                     f.write(zip_binary)
                 logging.info("store encrypted file:{}".format(filename))
 
-        if should_add_processing_label:
+        if has_encrypted_file:
             client.add_label(message_id, label_name2id_table[PROCESSING_LABEL])
         else:
             client.add_label(message_id, label_name2id_table[DONE_LABEL])
@@ -70,18 +83,23 @@ def store_encrypted_zip_mail(newer_than):
 
 def decrypt_stored_files(newer_than, search_range):
     unzipper = MailUnzipper()
-    query_builder = GmailSearchQueryBuilder(newer_than)
 
     client = GoogleClient()
+    label_name2id_table = client.get_label_name2id_table()
+    my_address = client.get_my_address()
+    query_builder = GmailSearchQueryBuilder(newer_than, exclude_from=my_address)
+
     # processing
     processing_zip_mails = client.search_mails(query_builder.build_processing_mails_query(),
-                                               {'format': 'metadata', 'metadataHeaders': ['From']})
+                                               {'format': 'metadata',
+                                                'metadataHeaders': ['From', 'Subject', 'subject']})
+    logger.info("hit {} processing message".format(len(processing_zip_mails)))
 
     # processingメールがあれば、同一人物からのメールを検索し、パスワード候補を抽出、復号化を試みる。対象ファイルはまずtmp以下を探し、なければダウンロードしてくる
     # 復号に成功すればdoneフラグを立てて解凍済みファイルを自分宛てに再送
     # 失敗すればdoingのまま次の試行を待つ
     # TODO 関係ないメールが間に入った場合、何度も解析することになってしまう。フラグを立てるべき。ただし複数ファイルに対して暗号化されることもあるのでn:nのラベル管理が必要
-    # WARNING 時間軸は考慮してない。いったんnewer_than以降のメールはすべて解析する（パスワードを先に送るケースがある？）
+    # WARNING 時間軸は考慮してない。いったんnewer_than以降のメールはすべて解析する（パスワードを先に送るケースがありえる？）
 
     address_extractor = re.compile(r'.*<(.+)@(.+)>.*')
     for mail in processing_zip_mails:
@@ -89,13 +107,13 @@ def decrypt_stored_files(newer_than, search_range):
         # Fromの他にSenderやReply-toも考えられるが、オプション扱いなのでまずはFromで運用してみる
         from_kvs = list(filter(lambda x: x['name'] == 'From', mail['payload']['headers']))
         if len(from_kvs) == 0:
-            print("Warning: no From header message:", mail)
+            logger.error("No From header message:", mail)
             continue
 
         from_value = from_kvs[0]['value']
         match = address_extractor.match(from_value)
         if match is None:
-            print("Unknown address format:", from_value)
+            logger.error("Unknown address format:", from_value)
             continue
 
         if search_range == 'himself':
@@ -125,23 +143,34 @@ def decrypt_stored_files(newer_than, search_range):
         # del mail
 
         encrypted_file_paths = glob.glob(os.path.join(TMP_CACHE_DIR, message_id, "*.zip"))
-
-        # TODO 別サーバーでやってると保存されていない。保存し直す
-
+        # TODO 別サーバーでやってると保存されていない。そもそもlabelをサーバー側で管理するのを辞めるべき
         # 基本的には1つ想定
         for fpath in encrypted_file_paths:
             with zipfile.ZipFile(fpath) as zf:
-                print("try: ", password_candidates)
+                logger.debug("try: {}".format(password_candidates))
                 matched_password = unzipper.try_passwords(zf, password_candidates)
+                if matched_password is None:
+                    continue
 
-                if matched_password is not None:
-                    print("find correct password {} for {}".format(matched_password, fpath))
-                    unzipper.extract_all(zf, fpath.replace(".zip", ""), password=matched_password.encode('ascii'))
-                    # zf.extractall(fpath.replace(".zip", ""), pwd=matched_password.encode('ascii'))
-                    # TODO labelをdoneにする
-                    # TODO 解凍してthreadに紐付けてメール送信
-                else:
-                    pass
+                logger.debug("find correct password {} for {}".format(matched_password, fpath))
+                decrypted_file_path = fpath.replace(".zip", "_nopass")
+                unzipper.extract_all(zf, decrypted_file_path, password=matched_password.encode('ascii'))
+
+            shutil.make_archive(decrypted_file_path, 'zip', decrypted_file_path)
+            with open(decrypted_file_path + ".zip", 'rb') as f:
+                decrypted_zip_binary = f.read()
+            received_message_subject = client.extract_message_subject(mail)
+            fname = os.path.basename(decrypted_file_path)
+            reply = create_message_with_zip(my_address, my_address, 'Re: ' + received_message_subject,
+                                            'decrypted zip message', decrypted_zip_binary, fname + ".zip")
+            reply['threadId'] = mail['threadId']
+
+            sent = client.send_message(reply)
+            # zf.extractall(fpath.replace(".zip", ""), pwd=matched_password.encode('ascii'))
+            # TODO 複数添付のときに1つだけ解凍に成功した場合が難しい・・。どうするか考える
+            client.add_label(mail['id'], label_name2id_table[DONE_LABEL])
+            client.add_label(sent['id'], label_name2id_table[DONE_LABEL])
+            client.remove_label(mail['id'], label_name2id_table[PROCESSING_LABEL])
 
 
 def main():
@@ -178,7 +207,9 @@ def test_encode():
 
 
 if __name__ == '__main__':
-    # main()
+    # client = GoogleClient()
+    # ret = client.search_mails('filename:zip newer_than:7d from:"me" to:"me"')
+    # print("len:{}".format(len(ret)))
     # _storing_test()
     _decrypt_test()
     # test_encode()
