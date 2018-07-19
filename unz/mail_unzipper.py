@@ -84,13 +84,14 @@ class MailUnzipper:
             # TODO 日本語パスワードに対応？
             binary_c = c.encode('ascii')  # should be ascii
             zf.setpassword(binary_c)
-            chunk_size = 2 ** 5
+            chunk_size = 2 ** 20
 
             try:
                 for zinfo in zf.filelist:
                     with zf.open(zinfo.filename, "r") as f:
-                        # readしないと変なパスワードがパスしてしまう
-                        f.read(chunk_size)
+                        # readしないと変なパスワードがパスしてしまう(headerの特定の数値(8bit?)と暗号化列を強制復号したものが一緒か見てるだけなので
+                        while f.read(chunk_size):
+                            pass
                         pass
                 return c
             except:
@@ -106,7 +107,16 @@ class MailUnzipper:
             for t in zf.filelist:
                 if not (t.flag_bits & 0x800):
                     old_name = t.filename
-                    new_name = t.filename.encode('cp437').decode('sjis')
+                    new_name = None
+                    for encode_candidate in ['cp932', 'sjis', 'utf-8']:
+                        try:
+                            new_name = t.filename.encode('cp437').decode(encode_candidate)
+                            break
+                        except UnicodeDecodeError:
+                            continue
+                    if new_name is None:
+                        raise UnicodeDecodeError()
+
                     if old_name != new_name:
                         t.filename = new_name
                         zf.NameToInfo[new_name] = zf.NameToInfo[old_name]

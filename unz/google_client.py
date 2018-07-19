@@ -178,7 +178,8 @@ class GoogleClient:
         zip_attachment_ids = []
         for part in message['payload']['parts']:
             mime = part['mimeType']
-            if mime == 'application/zip':
+            if mime == 'application/zip' or \
+                    (mime == 'application/octet-stream' and part['filename'].endswith('.zip')):
                 zip_attachment_ids.append(part['body']['attachmentId'])
         return zip_attachment_ids
 
