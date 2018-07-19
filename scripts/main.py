@@ -30,9 +30,10 @@ def attachment_id2tmp_filename(attachment_id):
     return attachment_id[:30] + ".zip"
 
 
-def store_encrypted_zip_mail(newer_than):
-    client = GoogleClient()
+client = GoogleClient()
 
+
+def store_encrypted_zip_mail(newer_than):
     label_name2id_table = client.get_label_name2id_table()  # type: dict[str, str]
     my_address = client.get_my_address()
 
@@ -74,6 +75,9 @@ def store_encrypted_zip_mail(newer_than):
                 with open(os.path.join(save_dir, filename), 'wb') as f:
                     f.write(zip_binary)
                 logging.info("store encrypted file:{}".format(filename))
+            else:
+                # logging.info("not encrypted zip mail")
+                pass
 
         if has_encrypted_file:
             client.add_label(message_id, label_name2id_table[PROCESSING_LABEL])
@@ -84,7 +88,6 @@ def store_encrypted_zip_mail(newer_than):
 def decrypt_stored_files(newer_than, search_range):
     unzipper = MailUnzipper()
 
-    client = GoogleClient()
     label_name2id_table = client.get_label_name2id_table()
     my_address = client.get_my_address()
     query_builder = GmailSearchQueryBuilder(newer_than, exclude_from=my_address)
@@ -123,7 +126,7 @@ def decrypt_stored_files(newer_than, search_range):
 
         candidate_mails = client.search_mails(query_builder.build_password_candidate_mails_query(from_address))
 
-        # TODO 対象ファイルよりあとに送られたことを前提にできるようにする
+        # TODO 対象ファイルよりあとに送られたことを前提にできるようにする？
 
         password_candidates = []
         for message in candidate_mails:
@@ -152,11 +155,12 @@ def decrypt_stored_files(newer_than, search_range):
                 if matched_password is None:
                     continue
 
-                logger.debug("find correct password {} for {}".format(matched_password, fpath))
+                logger.info("find correct password {} for {}".format(matched_password, fpath))
                 decrypted_file_path = fpath.replace(".zip", "_nopass")
                 unzipper.extract_all(zf, decrypted_file_path, password=matched_password.encode('ascii'))
 
             shutil.make_archive(decrypted_file_path, 'zip', decrypted_file_path)
+
             with open(decrypted_file_path + ".zip", 'rb') as f:
                 decrypted_zip_binary = f.read()
             received_message_subject = client.extract_message_subject(mail)
@@ -164,21 +168,37 @@ def decrypt_stored_files(newer_than, search_range):
             reply = create_message_with_zip(my_address, my_address, 'Re: ' + received_message_subject,
                                             'decrypted zip message', decrypted_zip_binary, fname + ".zip")
             reply['threadId'] = mail['threadId']
-
             sent = client.send_message(reply)
-            # zf.extractall(fpath.replace(".zip", ""), pwd=matched_password.encode('ascii'))
+
+            client.add_label(sent['id'], label_name2id_table[DONE_LABEL])
+
             # TODO 複数添付のときに1つだけ解凍に成功した場合が難しい・・。どうするか考える
             client.add_label(mail['id'], label_name2id_table[DONE_LABEL])
-            client.add_label(sent['id'], label_name2id_table[DONE_LABEL])
             client.remove_label(mail['id'], label_name2id_table[PROCESSING_LABEL])
+
+            # remove cached files
+            # shutil.rmtree(decrypted_file_path)
+
+            os.remove(decrypted_file_path + ".zip")
+            os.remove(fpath)
 
 
 def main():
     parser = argparse.ArgumentParser('mail-unzipper')
-    parser.add_argument('--newer_than', type=str, default='1d', help='gmail search query: e.g. 1d, 1m, 1y')
+    parser.add_argument('--newer_than', type=str, default='1m', help='gmail search query: e.g. 1d, 1m, 1y')
     parser.add_argument('--range', type=str, default='domain', choices=['himself', 'domain'],
                         help='sender who can send password range(himself or domain)')
+    parser.add_argument('--verbose', action='store_true', default=False)
+    parser.add_argument('--silent', action='store_true', default=False)
     args = parser.parse_args()
+
+    if args.verbose:
+        logger.setLevel(logging.DEBUG)
+    elif args.silent:
+        logger.setLevel(logging.CRITICAL)
+    else:
+        logger.setLevel(logging.INFO)
+
     store_encrypted_zip_mail(args.newer_than)
     decrypt_stored_files(args.newer_than, args.range)
 
