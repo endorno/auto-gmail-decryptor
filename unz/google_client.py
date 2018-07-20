@@ -18,7 +18,7 @@ SCOPES = [
 ]
 
 SECRET_KEY_PATH = 'secrets/client_secret.json'
-CREDENTIAL_PATH = 'secrets/credentials.json'
+TOKEN_PATH = 'secrets/token.json'
 
 
 def create_message_with_zip(
@@ -56,7 +56,7 @@ class GoogleClient:
     @classmethod
     def store_credentials(cls):
         # Setup the Gmail API
-        store = file.Storage(CREDENTIAL_PATH)
+        store = file.Storage(TOKEN_PATH)
         creds = store.get()
         if not creds or creds.invalid:
             flow = client.flow_from_clientsecrets(SECRET_KEY_PATH, SCOPES)
@@ -65,7 +65,7 @@ class GoogleClient:
             print('already has valid credentials')
 
     def __init__(self):
-        store = file.Storage(CREDENTIAL_PATH)
+        store = file.Storage(TOKEN_PATH)
         creds = store.get()
         if not creds or creds.invalid:
             raise RuntimeError("no credentials. should get credentials before new")
