@@ -15,7 +15,7 @@ pip install -r requirements.txt
 python scripts/setup.py
 
 # run script
-python scripts/main.py --range domain --newer_than 1m --verbose
+PYTHONPATH=. python scripts/main.py --range domain --newer_than 1m --verbose
 
 # or set cron (not tested)
 

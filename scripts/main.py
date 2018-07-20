@@ -18,12 +18,16 @@ from pprint import pprint
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
+if logger.hasHandlers():  # default logger
+    logger.handlers.clear()
+logger.propagate = False  # stop propagate to root logger
 handler = colorlog.StreamHandler()
 handler.setFormatter(colorlog.ColoredFormatter(
     '%(log_color)s%(levelname)s:%(name)s:%(message)s'))
 logger.addHandler(handler)
 
 TMP_CACHE_DIR = "cache/"
+NOPASS_SUFFIX = "_nopass"
 
 
 def attachment_id2tmp_filename(attachment_id):
@@ -85,7 +89,7 @@ def store_encrypted_zip_mail(newer_than):
             client.add_label(message_id, label_name2id_table[DONE_LABEL])
 
 
-def decrypt_stored_files(newer_than, search_range):
+def decrypt_stored_files(newer_than, search_range, append_to_thread=False):
     unzipper = MailUnzipper()
 
     label_name2id_table = client.get_label_name2id_table()
@@ -148,39 +152,39 @@ def decrypt_stored_files(newer_than, search_range):
         encrypted_file_paths = glob.glob(os.path.join(TMP_CACHE_DIR, message_id, "*.zip"))
         # TODO 別サーバーでやってると保存されていない。そもそもlabelをサーバー側で管理するのを辞めるべき
         # 基本的には1つ想定
-        for fpath in encrypted_file_paths:
-            with zipfile.ZipFile(fpath) as zf:
+        for enc_fpath in encrypted_file_paths:
+            if enc_fpath.endswith(NOPASS_SUFFIX + ".zip"): continue
+
+            with zipfile.ZipFile(enc_fpath) as zf:
                 logger.debug("try: {}".format(password_candidates))
                 matched_password = unzipper.try_passwords(zf, password_candidates)
                 if matched_password is None:
                     continue
 
-                logger.info("find correct password {} for {}".format(matched_password, fpath))
-                decrypted_file_path = fpath.replace(".zip", "_nopass")
-                unzipper.extract_all(zf, decrypted_file_path, password=matched_password.encode('ascii'))
+                logger.info("find correct password {} for {}".format(matched_password, enc_fpath))
+                dec_dir_path = enc_fpath.replace(".zip", NOPASS_SUFFIX)
+                unzipper.extract_all(zf, dec_dir_path, password=matched_password.encode('ascii'))
 
-            shutil.make_archive(decrypted_file_path, 'zip', decrypted_file_path)
-
-            with open(decrypted_file_path + ".zip", 'rb') as f:
-                decrypted_zip_binary = f.read()
-            received_message_subject = client.extract_message_subject(mail)
-            fname = os.path.basename(decrypted_file_path)
-            reply = create_message_with_zip(my_address, my_address, 'Re: ' + received_message_subject,
-                                            'decrypted zip message', decrypted_zip_binary, fname + ".zip")
-            reply['threadId'] = mail['threadId']
-            sent = client.send_message(reply)
-
-            client.add_label(sent['id'], label_name2id_table[DONE_LABEL])
+            shutil.make_archive(dec_dir_path, 'zip', dec_dir_path)
+            if append_to_thread:
+                rezipped_path = dec_dir_path + ".zip"
+                with open(rezipped_path, 'rb') as f:
+                    decrypted_zip_binary = f.read()
+                received_message_subject = client.extract_message_subject(mail)
+                fname = os.path.basename(rezipped_path)
+                reply = create_message_with_zip(my_address, my_address, 'Re: ' + received_message_subject,
+                                                'decrypted zip message', decrypted_zip_binary, fname)
+                reply['threadId'] = mail['threadId']
+                sent = client.send_message(reply)
+                os.remove(rezipped_path)
 
             # TODO 複数添付のときに1つだけ解凍に成功した場合が難しい・・。どうするか考える
             client.add_label(mail['id'], label_name2id_table[DONE_LABEL])
             client.remove_label(mail['id'], label_name2id_table[PROCESSING_LABEL])
 
             # remove cached files
-            # shutil.rmtree(decrypted_file_path)
-
-            os.remove(decrypted_file_path + ".zip")
-            os.remove(fpath)
+            os.remove(enc_fpath)
+            # shutil.rmtree(dec_dir_path) # 解凍済みのファイルはそのままで
 
 
 def main():
@@ -190,6 +194,8 @@ def main():
                         help='sender who can send password range(himself or domain)')
     parser.add_argument('--verbose', action='store_true', default=False)
     parser.add_argument('--silent', action='store_true', default=False)
+    parser.add_argument('--only_decrypt', action='store_true', default=False,
+                        help='decrypt only. not send to same thread')
     args = parser.parse_args()
 
     if args.verbose:
@@ -200,7 +206,7 @@ def main():
         logger.setLevel(logging.INFO)
 
     store_encrypted_zip_mail(args.newer_than)
-    decrypt_stored_files(args.newer_than, args.range)
+    decrypt_stored_files(args.newer_than, args.range, not args.only_decrypt)
 
 
 def _storing_test():
@@ -228,9 +234,3 @@ def test_encode():
 
 if __name__ == '__main__':
     main()
-    # client = GoogleClient()
-    # ret = client.search_mails('filename:zip newer_than:7d from:"me" to:"me"')
-    # print("len:{}".format(len(ret)))
-    # _storing_test()
-    # _decrypt_test()
-    # test_encode()
