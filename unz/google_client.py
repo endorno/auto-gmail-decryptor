@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 import googleapiclient.discovery as gdiscovery
 from httplib2 import Http
 from oauth2client import file, client, tools
@@ -8,6 +7,7 @@ import base64
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
+from email import encoders
 
 SCOPES = [
     'https://www.googleapis.com/auth/gmail.readonly',
@@ -45,10 +45,11 @@ def create_message_with_zip(
     msg = MIMEBase('application', 'zip')
     msg.set_payload(zip_binary)
 
+    encoders.encode_base64(msg)
     msg.add_header('Content-Disposition', 'attachment', filename=filename)
     message.attach(msg)
 
-    return {'raw': base64.urlsafe_b64encode(message.as_bytes()).decode('ascii')}
+    return {'raw': base64.urlsafe_b64encode(message.as_bytes()).decode()}
 
 
 class GoogleClient:

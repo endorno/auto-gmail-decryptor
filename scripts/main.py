@@ -89,7 +89,7 @@ def store_encrypted_zip_mail(newer_than):
             client.add_label(message_id, label_name2id_table[DONE_LABEL])
 
 
-def decrypt_stored_files(newer_than, search_range, append_to_thread=False):
+def decrypt_stored_files(newer_than, search_range, append_to_thread=False, remain_decrypted_file=True):
     unzipper = MailUnzipper()
 
     label_name2id_table = client.get_label_name2id_table()
@@ -184,7 +184,8 @@ def decrypt_stored_files(newer_than, search_range, append_to_thread=False):
 
             # remove cached files
             os.remove(enc_fpath)
-            # shutil.rmtree(dec_dir_path) # 解凍済みのファイルはそのままで
+            if not remain_decrypted_file:
+                shutil.rmtree(dec_dir_path)
 
 
 def main():
@@ -217,20 +218,20 @@ def _decrypt_test():
     decrypt_stored_files('1m', 'himself')
 
 
-def test_encode():
-    path = 'tmp/1641719ea0d1ed77/ANGjdJ9rMSHopEXXYYKp7pXJQzTu62.zip'
-    pwd = b't9uphiP9UO'
-    import zipfile
-    with zipfile.ZipFile(path) as zf:
-        for t in zf.filelist:
-            if not (t.flag_bits & 0x800):
-                old_name = t.filename
-                new_name = t.filename.encode('cp437').decode('sjis')
-                t.filename = new_name
-                zf.NameToInfo[new_name] = zf.NameToInfo[old_name]
-                del zf.NameToInfo[old_name]
-        zf.extractall(pwd=pwd)
-
+# def test_encode():
+#     path = 'tmp/1641719ea0d1ed77/ANGjdJ9rMSHopEXXYYKp7pXJQzTu62.zip'
+#     pwd = b't9uphiP9UO'
+#     import zipfile
+#     with zipfile.ZipFile(path) as zf:
+#         for t in zf.filelist:
+#             if not (t.flag_bits & 0x800):
+#                 old_name = t.filename
+#                 new_name = t.filename.encode('cp437').decode('sjis')
+#                 t.filename = new_name
+#                 zf.NameToInfo[new_name] = zf.NameToInfo[old_name]
+#                 del zf.NameToInfo[old_name]
+#         zf.extractall(pwd=pwd)
+#
 
 if __name__ == '__main__':
     main()
